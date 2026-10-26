@@ -2,6 +2,12 @@
 
 This is a best-effort Sway port of the supplied Mangobutter Quickshell files and
 network app, integrated into `sway2.14-setup`.
+## Quick Install
+
+```bash
+chmod +x install.sh
+./install.sh
+```
 
 ## Install
 
