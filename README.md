@@ -5,6 +5,8 @@ network app, integrated into `sway2.14-setup`.
 ## Quick Install
 
 ```bash
+git clone https://github.com/theamazingbman/sway2.14-quickshell-fedora.git
+cd sway2.14-quickshell-fedora
 chmod +x install.sh
 ./install.sh
 ```
