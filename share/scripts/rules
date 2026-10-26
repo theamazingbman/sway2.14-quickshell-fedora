@@ -1,0 +1,214 @@
+#!/bin/sh
+# rules — ~/.config/mango/rules.conf (windowrule= lines) as rows for the
+# settings panel's Rules tab (quickshell/RulesPane.qml), and the tab's
+# editor verbs. Rows are tab-separated: section  match  detail  line
+# (match: "appid=kitty-scratch", detail: "floating · tag 8 · 60%×60%").
+#   rules                    print the rows
+#   rules get N              line N as fields: appid title tags float
+#                            monitor width height scratch desc (tab-separated)
+#   rules set N APPID TITLE TAGS FLOAT MONITOR WIDTH HEIGHT SCRATCH DESC
+#   rules add SECTION APPID TITLE TAGS FLOAT MONITOR WIDTH HEIGHT SCRATCH DESC
+#                            prints the new line number
+#   rules delete N
+#   rules pick               the open windows: appid, title per line
+#   rules check              mango -p on the file (also run before every write)
+#   rules open N             open rules.conf in the editor at line N
+# A "# text" line right above a rule is its note (the desc field). Every
+# write is tried through mango's own config check first; a bad rule is
+# reported and the file left alone. A scratchpad rule's key and command
+# are the toggle_named_scratchpad bind in keybinds.conf (scripts/keybinds).
+C="${XDG_CONFIG_HOME:-$HOME/.config}/mango"
+CONF="$C/rules.conf"
+IPC="$(dirname "$(readlink -f "$0")")/mango-ipc"
+
+# windowrule=k:v,k:v → F[k]=v (older and newer key spellings both)
+fields_awk='
+function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
+function norm(k) { gsub(/_/, "", k); return k }
+function fields(line,   rest, n, a, i, c) {
+    delete F
+    if (line !~ /^windowrule=/) return 0
+    rest = substr(line, 12)
+    n = split(rest, a, ",")
+    for (i = 1; i <= n; i++) {
+        c = index(a[i], ":"); if (c == 0) continue
+        F[norm(trim(substr(a[i], 1, c - 1)))] = trim(substr(a[i], c + 1))
+    }
+    return 1
+}
+function isheader(s) { return s ~ /^#[ \t]*---/ }
+function hasnote(n) { return (L[n-1] ~ /^#/ && !isheader(L[n-1]) && L[n+1] !~ /^windowrule=/) }'
+
+# what mango would take without complaint but not mean: sizes are a
+# fraction of the screen, tags 1-12
+validate() {
+    for v in "$6" "$7"; do
+        [ -z "$v" ] && continue
+        case "$v" in *[!0-9.]*|.|"") echo "size $v: a fraction of the screen, like 0.6" >&2; return 1 ;; esac
+        awk -v v="$v" 'BEGIN { exit !(v > 0 && v <= 1) }' || { echo "size $v: between 0 and 1 (a fraction of the screen)" >&2; return 1; }
+    done
+    if [ -n "$3" ]; then
+        case "$3" in *[!0-9]*) echo "tag $3: a number 1-12" >&2; return 1 ;; esac
+        if [ "$3" -lt 1 ] || [ "$3" -gt 12 ]; then echo "tag $3: a number 1-12" >&2; return 1; fi
+    fi
+    [ -n "$1$2" ] || { echo "a rule needs an app id or a title to match" >&2; return 1; }
+}
+fmt() {
+    awk -v id="$1" -v title="$2" -v tags="$3" -v fl="$4" -v mon="$5" -v w="$6" -v h="$7" -v sc="$8" '
+    function yn(v) { return (v == "yes" || v == "1" || v == "true") }
+    BEGIN {
+        out = "windowrule="
+        if (yn(sc)) out = out "isnamedscratchpad:1,"
+        else if (yn(fl)) out = out "isfloating:1,"
+        if (w != "") out = out "width:" w ","
+        if (h != "") out = out "height:" h ","
+        if (tags != "") out = out "tags:" tags ","
+        if (mon != "") out = out "monitor:" mon ","
+        if (id != "") out = out "appid:" id ","
+        if (title != "") out = out "title:" title ","
+        sub(/,$/, "", out); print out
+    }'
+}
+
+# mango reads the candidate; its errors (file and line stripped) refuse it
+check() {
+    out=$(mango -c "$1" -p 2>&1) && return 0
+    printf '%s\n' "$out" | sed 's/\x1b\[[0-9;]*m//g' | awk '/^\[ERROR\]:/ { sub(/^\[ERROR\]:[ \t]*/, ""); print }' >&2
+    return 1
+}
+commit() { if check "$1"; then mv "$1" "$CONF"; else rm -f "$1"; return 1; fi; }
+
+# the program a terminal is showing: follow first children down from the
+# window's pid, skipping shells; empty when it ends in a shell (a plain
+# terminal) or the window has no children (a GUI app)
+innermost() {
+    pid="$1"; found=""
+    while :; do
+        # the child that has children of its own (the shell under a
+        # terminal, past kitty's kitten helper), else the newest child
+        child=$(awk -v pp="$pid" '
+            { ppid[$1] = $4; if ($4 == pp) kids[++n] = $1 }
+            END { for (i = 1; i <= n; i++) for (q in ppid) if (ppid[q] == kids[i]) { print kids[i]; exit }
+                  if (n) print kids[n] }' /proc/[0-9]*/stat 2>/dev/null)
+        [ -n "$child" ] || break
+        pid="$child"
+        name=$(tr '\0' ' ' 2>/dev/null < "/proc/$pid/cmdline" | sed 's/ $//')
+        # an interpreter running a script is the script (python3 /usr/bin/pulsemixer)
+        case "${name%% *}" in
+            */python*|python*|*/perl|perl|*/ruby|ruby|*/node|node|*/lua*|lua*) name="${name#* }" ;;
+        esac
+        case "${name%% *}" in
+            */bash|bash|*/zsh|zsh|*/fish|fish|*/sh|sh|*/dash|dash) found="" ;;
+            "") ;;
+            *) found="$name" ;;
+        esac
+    done
+    printf '%s\n' "$found"
+}
+
+case "${1:-}" in
+"")
+    [ -f "$CONF" ] || exit 0
+    exec awk "$fields_awk"'
+    { L[NR] = $0 }
+    END {
+        section = "rules"
+        for (i = 1; i <= NR; i++) {
+            if (isheader(L[i])) { s = L[i]; sub(/^#[ \t]*---[ \t]*/, "", s); sub(/[ \t]*(---|:|\().*$/, "", s); section = s; continue }
+            if (!fields(L[i])) continue
+            m = ""
+            if ("appid" in F) m = "appid=" F["appid"]
+            else if ("title" in F) m = "title=" F["title"]
+            n = 0; d = ""
+            if (F["isnamedscratchpad"] == "1") d = d (n++ ? " · " : "") "scratchpad"
+            else if (F["isfloating"] == "1") d = d (n++ ? " · " : "") "floating"
+            if ("width" in F || "height" in F) d = d (n++ ? " · " : "") (F["width"] * 100) "%×" (F["height"] * 100) "%"
+            if ("tags" in F) d = d (n++ ? " · " : "") "tag " F["tags"]
+            if ("monitor" in F) d = d (n++ ? " · " : "") "monitor " F["monitor"]
+            if ("title" in F && "appid" in F) d = d (n++ ? " · " : "") "title " F["title"]
+            if (hasnote(i)) { note = L[i-1]; sub(/^#+[ \t]*/, "", note); d = note (n ? "  (" d ")" : "") }
+            printf "%s\t%s\t%s\t%d\n", section, m, d, i
+        }
+    }' "$CONF"
+    ;;
+get)
+    exec awk -v n="${2:?line}" "$fields_awk"'
+    { L[NR] = $0 }
+    END {
+        if (!fields(L[n])) exit 1
+        note = ""; if (hasnote(n)) { note = L[n-1]; sub(/^#+[ \t]*/, "", note) }
+        sc = (F["isnamedscratchpad"] == "1")
+        printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", F["appid"], F["title"], F["tags"],
+            (sc || F["isfloating"] == "1") ? "yes" : "no", F["monitor"], F["width"], F["height"], sc ? "yes" : "no", note
+    }' "$CONF"
+    ;;
+set)
+    n="${2:?line}"; shift 2; validate "$@" || exit 1; line=$(fmt "$@"); note="$9"; tmp="$CONF.tmp"
+    # the rule's line moves when its note comes or goes: the new number is printed
+    newline=$(awk -v n="$n" -v l="$line" -v d="$note" "$fields_awk"'
+        { L[NR] = $0 }
+        END {
+            hd = hasnote(n)
+            for (i = 1; i <= NR; i++) {
+                if (i == n - 1 && hd) { if (d != "") print "# " d; continue }
+                if (i == n) { if (!hd && d != "") print "# " d; print l; continue }
+                print L[i]
+            }
+            print n + (hd && d == "" ? -1 : !hd && d != "" ? 1 : 0) > "/dev/stderr"
+        }' "$CONF" 2>&1 >"$tmp")
+    commit "$tmp" || exit 1
+    echo "$newline"
+    ;;
+add)
+    sec="${2:?section}"; shift 2; validate "$@" || exit 1; line=$(fmt "$@"); note="$9"; tmp="$CONF.tmp"
+    [ -f "$CONF" ] || : > "$CONF"
+    ins=$(awk -v sec="$sec" '
+        /^#[ \t]*---/ { s = $0; sub(/^#[ \t]*---[ \t]*/, "", s); sub(/[ \t]*(---|:|\().*$/, "", s)
+                       insec = (tolower(s) == tolower(sec)); if (insec) last = NR; next }
+        insec && !/^[ \t]*$/ { last = NR }
+        END { print last + 0 }' "$CONF")
+    extra=0; [ -n "$note" ] && extra=1
+    if [ "$ins" -gt 0 ]; then
+        awk -v n="$ins" -v l="$line" -v d="$note" '{ print } NR == n { if (d != "") print "# " d; print l }' "$CONF" > "$tmp"
+        newline=$((ins + 1 + extra))
+    else
+        { cat "$CONF"; printf '\n# --- %s ---\n' "$sec"; [ -n "$note" ] && printf '# %s\n' "$note"; printf '%s\n' "$line"; } > "$tmp"
+        newline=$(($(wc -l < "$CONF") + 3 + extra))
+    fi
+    commit "$tmp" || exit 1
+    echo "$newline"
+    ;;
+delete)
+    n="${2:?line}"; tmp="$CONF.tmp"
+    awk -v n="$n" "$fields_awk"'
+        { L[NR] = $0 }
+        END { hd = hasnote(n); for (i = 1; i <= NR; i++) { if (i == n || (hd && i == n - 1)) continue; print L[i] } }' "$CONF" > "$tmp"
+    commit "$tmp" || exit 1
+    ;;
+pick)
+    # the open windows, one per line: appid, title, the command that
+    # opened it (the process's command line), and for a terminal the
+    # program running inside it (its deepest child that isn't a shell) —
+    # a kitty showing pulsemixer is matched and opened as pulsemixer, not
+    # as every kitty. The bar's own windows are left out.
+    "$IPC" get all-clients 2>/dev/null | tr '{' '\n' | awk '
+        match($0, /"title":"([^"\\]|\\.)*"/) { t = substr($0, RSTART + 9, RLENGTH - 10)
+            if (match($0, /"appid":"([^"\\]|\\.)*"/)) { a = substr($0, RSTART + 9, RLENGTH - 10)
+                p = ""; if (match($0, /"pid":[0-9]+/)) p = substr($0, RSTART + 6, RLENGTH - 6)
+                if (a != "org.quickshell" && a != "") printf "%s\t%s\t%s\n", a, t, p } }' |
+    while IFS="$(printf '\t')" read -r a t p; do
+        cmd=""; inner=""
+        if [ -n "$p" ] && [ -r "/proc/$p/cmdline" ]; then
+            cmd=$(tr '\0' ' ' < "/proc/$p/cmdline" | sed 's/ $//')
+            inner=$(innermost "$p")
+        fi
+        printf '%s\t%s\t%s\t%s\n' "$a" "$t" "$cmd" "$inner"
+    done
+    ;;
+check)  [ -f "$CONF" ] && check "$CONF" ;;
+open)
+    if command -v geany >/dev/null 2>&1; then exec geany --line="${2:-1}" "$CONF"; fi
+    exec xdg-open "$CONF"
+    ;;
+*)  echo "usage: rules [get N | set ... | add ... | delete N | pick | check | open N]" >&2; exit 2 ;;
+esac

@@ -1,0 +1,16 @@
+#!/bin/bash
+# power — rofi power menu. Screen Off hands over to scripts/screen-off
+# (wakes on the next input); the rest go through systemd.
+FUZZEL_THEME="$HOME/.config/sway/fuzzel/power.rasi"
+SCRIPTS="$HOME/.config/sway/scripts"
+
+chosen=$(printf '%s\n' "[Cancel]" "Screen Off" "Logout" "Shutdown" "Reboot" | \
+    fuzzel --dmenu --prompt="Power Menu: " --config="$FUZZEL_THEME")
+
+case "$chosen" in
+    "Screen Off") exec "$SCRIPTS/screen-off" ;;
+    "Logout") swaymsg exit ;;
+    "Shutdown") systemctl poweroff ;;
+    "Reboot") systemctl reboot ;;
+    *) exit 0 ;;
+esac

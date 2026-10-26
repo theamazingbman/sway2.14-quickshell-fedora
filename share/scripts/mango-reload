@@ -1,0 +1,9 @@
+#!/bin/bash
+# mango-reload — reload mango's config, then have the bar re-apply the
+# gaps and the effects (toggles, border width, unfocused opacity):
+# reload_config resets every setoption value back to the config files'.
+SHARE="$(dirname "$(dirname "$(readlink -f "$0")")")"
+
+"$SHARE/scripts/mango-ipc" dispatch reload_config >/dev/null 2>&1 || true
+qs -p "$SHARE/quickshell" ipc call wm applyGaps >/dev/null 2>&1 || true
+qs -p "$SHARE/quickshell" ipc call wm applyEffects >/dev/null 2>&1 || true

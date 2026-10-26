@@ -1,0 +1,176 @@
+/* --- Color Variables --- */
+@define-color bg-trans alpha(@base,0.65);
+@define-color base     #292a2e;
+@define-color surface  #363a4f;
+@define-color overlay  #494d64;
+@define-color text     #cad3f5;
+@define-color lavender #b7bdf8;
+@define-color sapphire #7dc4e4;
+@define-color green    #a6da95;
+@define-color yellow   #eed49f;
+@define-color red      #ed8796;
+@define-color mauve    #c6a0f6;
+
+/* --- Global Configurations --- */
+* {
+    font-family:
+        "JetBrainsMono Nerd Font", "Font Awesome 6 Free", "Helvetica Neue",
+        sans-serif;
+    font-size: 15px;
+    font-weight: bold;
+    border: none;
+    border-radius: 0;
+    min-height: 0;
+}
+
+/* --- Main Window Styling (Floating Island) --- */
+window#waybar {
+    background-color: @base;
+    color: @text;
+    transition-property: background-color;
+    transition-duration: 0.5s;
+}
+
+/* --- Workspaces Container (Keeps the Pill Shape) --- */
+#workspaces {
+    padding: 0px 14px;
+    margin: 6px 4px;
+    background-color: @base;
+    border: 1px solid @overlay;
+    border-radius: 12px;
+    box-shadow: rgba(0, 0, 0, 0.116) 0px 1px 3px;
+}
+
+/* --- Other Modules Formatting (Pill shape removed) --- */
+#clock,
+#battery,
+#cpu,
+#memory,
+#disk,
+#temperature,
+#backlight,
+#network,
+#pulseaudio,
+#wireplumber,
+#custom-media,
+#tray,
+#mode,
+#idle_inhibitor,
+#scratchpad,
+#power-profiles-daemon,
+#bluetooth,
+#mpd {
+    padding: 0px 6px;
+    margin: 6px 2px;
+    color: @text;
+    /* Pill styling removed so they sit cleanly on the main bar background */
+    background-color: transparent;
+    border: none;
+    border-radius: 0px;
+    box-shadow: none;
+}
+
+/* --- Workspaces Buttons Inside the Pill --- */
+#workspaces button {
+    padding: 0px 8px;
+    margin: 4px 2px;
+    color: @text;
+    background-color: transparent;
+    border-radius: 8px;
+    transition: all 0.3s ease;
+}
+
+#workspaces button:hover {
+    background-color: @overlay;
+    color: @lavender;
+}
+
+#workspaces button.active {
+    background-color: @mauve;
+    color: @sapphire;
+    min-width: 25px;
+}
+
+#workspaces button.urgent {
+    background-color: @red;
+    color: @base;
+}
+
+/* --- System Module Specific Highlights --- */
+#clock {
+    color: @text;
+    font-weight: bold;
+}
+
+#battery {
+    color: @green;
+}
+
+#battery.charging,
+#battery.plugged {
+    color: @green;
+}
+
+#battery.critical:not(.charging) {
+    color: @red;
+    animation-name: blink;
+    animation-duration: 0.5s;
+    animation-timing-function: linear;
+    animation-iteration-count: infinite;
+    animation-direction: alternate;
+}
+
+#network {
+    color: @text;
+}
+
+#network.disconnected {
+    color: @red;
+}
+
+#pulseaudio {
+    color: @text;
+}
+
+#pulseaudio.muted {
+    color: @overlay;
+    background-color: transparent;
+}
+
+#bluetooth {
+    color: @text;
+}
+
+#temperature {
+    color: @text;
+}
+
+#cpu {
+    color: @text;
+}
+
+#memory {
+    color: @text;
+    min-width: 78px; /* adjust as needed */
+}
+
+#tray {
+    padding: 0px 10px;
+}
+
+#tray > .passive {
+    -gtk-icon-effect: dim;
+}
+
+#tray > .needs-attention {
+    -gtk-icon-effect: highlight;
+    background-color: @red;
+}
+
+/* --- Hardware Critical Animations --- */
+@keyframes blink {
+    to {
+        background-color: @surface;
+        color: @red;
+    }
+}

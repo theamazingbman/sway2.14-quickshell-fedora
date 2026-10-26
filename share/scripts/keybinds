@@ -1,0 +1,267 @@
+#!/bin/sh
+# keybinds — every bind in keybinds.conf (and any the user added in
+# local.conf) as rows for the settings panel's Keybinds tab
+# (quickshell/KeybindsPane.qml), one per line, tab-separated:
+#   section  keys  description  where  kind  command
+# keys: alternatives split by "|", each one "+"-joined keycaps.
+# where: a line number in keybinds.conf, or local:N for local.conf.
+# kind: run (a spawn) or do (one of mango's actions); command: what it
+# runs, or the action and its arguments as the file writes them.
+#   keybinds              print the rows
+#   keybinds open WHERE   open that file in geany at that line
+# The tab's editor (keybinds.conf only; local.conf is yours by hand):
+#   keybinds get N        line N as fields: mod  key  desc  run|do  value
+#   keybinds set N MOD KEY DESC KIND VALUE      rewrite line N (and the
+#                         "# desc" above it: replaced, added or dropped)
+#   keybinds add SECTION MOD KEY DESC KIND VALUE   new bind at the end of
+#                         "# --- SECTION ---"; prints the new line number
+#   keybinds delete N     drop line N and its "# desc"
+#   keybinds check        a chord bound twice in keybinds.conf, if any
+#   keybinds apply        scripts/mango-reload
+# Every write is tried through `check` first; a duplicate is refused and
+# the file left alone. VALUE for do is "action,args" as in the file.
+#
+# What it reads from the files:
+#   "# --- name ---"   starts a section (name ends at ":", "(" or "---")
+#   "# Text"           right above a bind describes it; notes go above that.
+#                      Above a run of back-to-back binds it's a note for the
+#                      group, and each bind is labelled from its action.
+# Binds with the same description in a section share a row (arrows and
+# hjkl, XF86 keys and Super+F12), and runs of view/tag binds fold into one.
+C="${XDG_CONFIG_HOME:-$HOME/.config}/mango"
+CONF="$C/keybinds.conf"
+LOCAL="$C/local.conf"
+
+if [ "$1" = open ]; then
+    case "${2:-1}" in
+        local:*) exec geany --line="${2#local:}" "$LOCAL" ;;
+        *)       exec geany --line="${2:-1}" "$CONF" ;;
+    esac
+fi
+
+# ---- the editor's verbs ----
+# bind line from fields; MODS upper-cased, "none" for no modifier
+fmt() {
+    mods=$(printf '%s' "$1" | tr '[:lower:]' '[:upper:]'); [ -n "$mods" ] || mods=NONE
+    if [ "$4" = run ]; then printf 'bind=%s,%s,spawn,%s\n' "$mods" "$2" "$5"
+    else printf 'bind=%s,%s,%s\n' "$mods" "$2" "$5"; fi
+}
+# a chord bound twice refuses the candidate file
+check() {
+    awk -F, '
+        /^bind=/ { k = toupper(substr($1, 6)) "," $2
+                   if (k in seen) { printf "key %s+%s is bound twice (lines %d and %d)\n", tolower(substr($1, 6)), $2, seen[k], NR > "/dev/stderr"; bad = 1 }
+                   else seen[k] = NR }
+        END { exit bad }' "$1"
+}
+commit() { if check "$1"; then mv "$1" "$CONF"; else rm -f "$1"; return 1; fi; }
+# the "# desc" line directly above a bind: a plain comment, not a header,
+# and not a note for a run (the line after the bind is another bind)
+case "${1:-}" in
+get)
+    exec awk -v n="${2:?line}" '
+        { L[NR] = $0 }
+        END {
+            if (L[n] !~ /^bind=/) exit 1
+            s = substr(L[n], 6); split(s, f, ",")
+            mod = tolower(f[1]); if (mod == "none") mod = "none"
+            key = f[2]
+            rest = substr(s, length(f[1]) + length(f[2]) + 3)
+            if (f[3] == "spawn") { kind = "run"; val = substr(rest, 7) } else { kind = "do"; val = rest }
+            desc = ""
+            if (L[n-1] ~ /^#/ && L[n-1] !~ /^#[ \t]*---/ && L[n+1] !~ /^bind/) { desc = L[n-1]; sub(/^#+[ \t]*/, "", desc) }
+            printf "%s\t%s\t%s\t%s\t%s\n", mod, key, desc, kind, val
+        }' "$CONF"
+    ;;
+set)
+    n="${2:?line}"; line=$(fmt "$3" "$4" "$5" "$6" "$7"); desc="$5"; tmp="$CONF.tmp"
+    awk -v n="$n" -v l="$line" -v d="$desc" '
+        { L[NR] = $0 }
+        END {
+            hasdesc = (L[n-1] ~ /^#/ && L[n-1] !~ /^#[ \t]*---/ && L[n+1] !~ /^bind/)
+            for (i = 1; i <= NR; i++) {
+                if (i == n - 1 && hasdesc) { if (d != "") print "# " d; continue }
+                if (i == n) { if (!hasdesc && d != "") print "# " d; print l; continue }
+                print L[i]
+            }
+        }' "$CONF" > "$tmp"
+    commit "$tmp" || exit 1
+    echo "$n"
+    ;;
+add)
+    sec="${2:?section}"; line=$(fmt "$3" "$4" "$5" "$6" "$7"); desc="$5"; tmp="$CONF.tmp"
+    ins=$(awk -v sec="$sec" '
+        /^#[ \t]*---/ { s = $0; sub(/^#[ \t]*---[ \t]*/, "", s); sub(/[ \t]*(---|:|\().*$/, "", s)
+                       insec = (tolower(s) == tolower(sec)); if (insec) last = NR; next }
+        insec && !/^[ \t]*$/ { last = NR }
+        END { print last + 0 }' "$CONF")
+    extra=0; [ -n "$desc" ] && extra=1
+    if [ "$ins" -gt 0 ]; then
+        awk -v n="$ins" -v l="$line" -v d="$desc" '{ print } NR == n { if (d != "") print "# " d; print l }' "$CONF" > "$tmp"
+        newline=$((ins + 1 + extra))
+    else
+        { cat "$CONF"; printf '\n# --- %s ---\n' "$sec"; [ -n "$desc" ] && printf '# %s\n' "$desc"; printf '%s\n' "$line"; } > "$tmp"
+        newline=$(($(wc -l < "$CONF") + 3 + extra))
+    fi
+    commit "$tmp" || exit 1
+    echo "$newline"
+    ;;
+delete)
+    n="${2:?line}"; tmp="$CONF.tmp"
+    awk -v n="$n" '
+        { L[NR] = $0 }
+        END {
+            hasdesc = (L[n-1] ~ /^#/ && L[n-1] !~ /^#[ \t]*---/ && L[n+1] !~ /^bind/)
+            for (i = 1; i <= NR; i++) { if (i == n || (hasdesc && i == n - 1)) continue; print L[i] }
+        }' "$CONF" > "$tmp"
+    commit "$tmp" || exit 1
+    ;;
+check)  check "$CONF" ;;
+apply)  exec "$(dirname "$(readlink -f "$0")")/mango-reload" ;;
+esac
+[ -z "${1:-}" ] || exit 0
+
+# local.conf only when it exists (a user may delete it)
+set --
+[ -f "$LOCAL" ] && set -- "$LOCAL"
+exec awk '
+function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
+function isbind(s) { return s ~ /^(bind[a-z]*|mousebind|axisbind|gesturebind)=/ }
+function isheader(s) { return s ~ /^#[ \t]*---/ }
+
+function mods(m,   n, a, i, out) {
+    if (toupper(m) == "NONE") return ""
+    n = split(m, a, "+")
+    for (i = 1; i <= n; i++)
+        out = out (out != "" ? "+" : "") toupper(substr(a[i], 1, 1)) tolower(substr(a[i], 2))
+    return out
+}
+function keyname(k) {
+    if (k in K) return K[k]
+    if (length(k) == 1) return toupper(k)
+    sub(/^XF86/, "", k)
+    return k
+}
+function combo(m, k) { m = mods(m); return m != "" ? m "+" k : k }
+
+function label(action, arg) {
+    if (action == "focusdir")        return "Focus " arg
+    if (action == "exchange_client") return "Swap window " arg
+    if (action == "focusmon")        return "Focus monitor " arg
+    if (action == "tagmon")          return "Send window to monitor " arg
+    if (action == "setmfact")        return (arg ~ /^-/ ? "Shrink" : "Grow") " master area"
+    if (action == "incnmaster")      return (arg ~ /^-/ ? "Fewer" : "More") " master windows"
+    if (action == "focusstack")      return (arg == "prev" ? "Previous" : "Next") " window"
+    if (action == "viewtoleft")      return "Previous tag"
+    if (action == "viewtoright")     return "Next tag"
+    if (action == "viewtoleft_have_client")  return "Previous tag, taking the window"
+    if (action == "viewtoright_have_client") return "Next tag, taking the window"
+    if (action == "toggleoverview")  return "Overview"
+    if (action == "killclient")      return "Close window"
+    if (action == "togglefloating")  return "Toggle floating"
+    if (action == "togglefullscreen") return "Fullscreen"
+    if (action == "moveresize")      return arg == "curresize" ? "Resize window" : "Move window"
+    if (action == "spawn") { sub(/^[^ ]*\//, "", arg); return arg }
+    return trim(action " " arg)
+}
+
+# view/tag N: fold a run into one row ("View tag 1–12")
+function foldable(action, arg) {
+    return (action == "view" || action == "tag" || action == "toggleview") && arg ~ /^[0-9]+$/
+}
+function folddesc(action, a, b,   tags) {
+    tags = (a == b) ? a : a "–" b
+    if (action == "view") return "View tag " tags
+    if (action == "tag")  return "Move window to tag " tags
+    return "Toggle tag " tags
+}
+
+BEGIN {
+    FS = ","
+    K["Return"] = "Enter"; K["space"] = "Space"; K["Tab"] = "Tab"; K["Escape"] = "Esc"
+    K["Left"] = "←"; K["Right"] = "→"; K["Up"] = "↑"; K["Down"] = "↓"
+    K["grave"] = "`"; K["comma"] = ","; K["period"] = "."; K["slash"] = "/"
+    K["minus"] = "-"; K["equal"] = "="; K["semicolon"] = ";"; K["apostrophe"] = "\047"
+    K["bracketleft"] = "["; K["bracketright"] = "]"; K["backslash"] = "\\"
+    K["plus"] = "Plus"; K["BackSpace"] = "Backspace"; K["Delete"] = "Del"; K["Print"] = "PrtSc"
+    K["XF86AudioRaiseVolume"] = "Vol Up"; K["XF86AudioLowerVolume"] = "Vol Down"
+    K["XF86AudioMute"] = "Mute"; K["XF86AudioMicMute"] = "Mic Mute"
+    K["XF86MonBrightnessUp"] = "Brightness Up"; K["XF86MonBrightnessDown"] = "Brightness Down"
+    K["btn_left"] = "Left click"; K["btn_right"] = "Right click"; K["btn_middle"] = "Middle click"
+}
+
+# local.conf is read after keybinds.conf; its binds land in a "local"
+# section (headers in it are ignored) and open there.
+FNR == 1 && NR > 1 { islocal = 1; L[NR] = "# --- local ---" ; W[NR] = "local:0"; NR++ }
+{ L[NR] = $0; W[NR] = (islocal ? "local:" FNR : FNR) }
+
+END {
+    section = "other"; nrows = 0; lastfold = 0
+    for (i = 1; i <= NR; i++) {
+        line = L[i]
+        if (isheader(line)) {
+            s = line
+            sub(/^#[ \t]*---[ \t]*/, "", s)
+            sub(/[ \t]*(---|:|\().*$/, "", s)
+            section = s
+            continue
+        }
+        if (!isbind(line)) { if (line !~ /^#/) lastfold = 0; continue }
+
+        type = substr(line, 1, index(line, "=") - 1)
+        n = split(substr(line, index(line, "=") + 1), f, ",")
+        for (j = 1; j <= n; j++) f[j] = trim(f[j])
+
+        # the fields past the action rejoin with the commas they were split on
+        first = (type == "gesturebind") ? 4 : 3
+        action = f[first]; arg = ""
+        for (j = first + 1; j <= n; j++) arg = arg (j > first + 1 ? "," : "") f[j]
+
+        if (type == "mousebind")        keys = combo(f[1], keyname(f[2]))
+        else if (type == "axisbind")    keys = combo(f[1], "Scroll " tolower(f[2]))
+        else if (type == "gesturebind") keys = combo(f[1], f[3] "-finger swipe " f[2])
+        else                            keys = combo(f[1], keyname(f[2]))
+
+        if (foldable(action, arg)) {
+            fid = section SUBSEP f[1] SUBSEP action
+            if (lastfold && FOLD[lastfold] == fid) {
+                FKEYS[lastfold] = FKEYS[lastfold] " " keyname(f[2])
+                FLAST[lastfold] = arg
+                continue
+            }
+            nrows++
+            SEC[nrows] = section; LINE[nrows] = W[i]; KIND[nrows] = "do"; CMD[nrows] = action
+            FOLD[nrows] = fid; FMODS[nrows] = f[1]; FACT[nrows] = action
+            FKEYS[nrows] = keyname(f[2]); FFIRST[nrows] = arg; FLAST[nrows] = arg
+            lastfold = nrows
+            continue
+        }
+        lastfold = 0
+
+        desc = ""
+        if (L[i-1] ~ /^#/ && !isheader(L[i-1]) && !isbind(L[i+1])) {
+            desc = L[i-1]
+            sub(/^#+[ \t]*/, "", desc)
+        }
+        if (desc == "") desc = label(action, arg)
+
+        k = section SUBSEP desc
+        if (k in SEEN) { KEYS[SEEN[k]] = KEYS[SEEN[k]] "|" keys; continue }
+        nrows++
+        SEEN[k] = nrows
+        SEC[nrows] = section; KEYS[nrows] = keys; DESC[nrows] = desc; LINE[nrows] = W[i]
+        KIND[nrows] = (action == "spawn") ? "run" : "do"
+        CMD[nrows] = (action == "spawn") ? arg : action (arg != "" ? "," arg : "")
+    }
+
+    for (r = 1; r <= nrows; r++) {
+        if (r in FOLD) {
+            fk = FKEYS[r]
+            sub(/1 2 3 4 5 6 7 8 9/, "1…9", fk)
+            KEYS[r] = combo(FMODS[r], fk)
+            DESC[r] = folddesc(FACT[r], FFIRST[r], FLAST[r])
+        }
+        printf "%s\t%s\t%s\t%s\t%s\t%s\n", SEC[r], KEYS[r], DESC[r], LINE[r], KIND[r], CMD[r]
+    }
+}
+' "$CONF" "$@"

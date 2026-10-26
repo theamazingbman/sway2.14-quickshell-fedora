@@ -1,0 +1,10 @@
+#!/bin/sh
+# launcher — open the bar's app launcher (quickshell/LauncherPopup.qml).
+# rofi only runs when the bar isn't there to answer, so Super+space still
+# launches things if quickshell has crashed.
+SHARE="$(dirname "$(dirname "$(readlink -f "$0")")")"
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/mango"
+qs -p "$SHARE/quickshell" ipc call launcher toggle >/dev/null 2>&1 && exit 0
+# the wallpaper palette (state/colors.rasi) is imported on top of the theme
+exec rofi -show drun -show-icons -theme "$SHARE/rofi/config.rasi" \
+    -theme-str "@import \"$STATE/colors.rasi\""

@@ -1,0 +1,59 @@
+singleton Theme Theme.qml
+singleton Wm Wm.qml
+singleton Sys Sys.qml
+singleton Batteries Batteries.qml
+singleton BarIpc BarIpc.qml
+singleton Pomodoro Pomodoro.qml
+singleton WeatherData WeatherData.qml
+singleton UpdateCount UpdateCount.qml
+singleton MediaState MediaState.qml
+Bar Bar.qml
+BarModule BarModule.qml
+Tags Tags.qml
+LayoutButton LayoutButton.qml
+Commands Commands.qml
+Title Title.qml
+Media Media.qml
+MediaPopup MediaPopup.qml
+Metrics Metrics.qml
+Volume Volume.qml
+VolumePopup VolumePopup.qml
+Network Network.qml
+Tray Tray.qml
+Clock Clock.qml
+CalendarPopup CalendarPopup.qml
+Launcher Launcher.qml
+Screenshot Screenshot.qml
+CapsLock CapsLock.qml
+MicMute MicMute.qml
+Updates Updates.qml
+Bell Bell.qml
+Popout Popout.qml
+TweakSlider TweakSlider.qml
+TogglePill TogglePill.qml
+Weather Weather.qml
+WeatherPopup WeatherPopup.qml
+NotifyPopup NotifyPopup.qml
+PowerPopup PowerPopup.qml
+MetricsPopup MetricsPopup.qml
+LauncherPopup LauncherPopup.qml
+QuickTile QuickTile.qml
+RadarView RadarView.qml
+RulesPane RulesPane.qml
+SettingsPopup SettingsPopup.qml
+KeybindsPane KeybindsPane.qml
+LayoutTweaks LayoutTweaks.qml
+BarTweaks BarTweaks.qml
+WallpaperPane WallpaperPane.qml
+DisplaysPane DisplaysPane.qml
+EditField EditField.qml
+EditButton EditButton.qml
+ChordField ChordField.qml
+Txt Txt.qml
+SectionLabel SectionLabel.qml
+Toggle Toggle.qml
+Btn Btn.qml
+ListRow ListRow.qml
+Keycap Keycap.qml
+EditorPanel EditorPanel.qml
+Verb Verb.qml

@@ -1,0 +1,61 @@
+#!/bin/sh
+# setup-update — pull the setup's repo and run its installer, from the
+# folder install.sh was last run from (recorded in the state folder's
+# shipped/). Nothing here runs on its own: the command menu's "Update
+# setup" opens a terminal on it, and the update terminals ask once at the
+# end whether the setup has moved on.
+#   setup-update          pull (clone if the folder is gone), install, wait for enter
+#   setup-update check    say how far behind the installed setup is; exit 0 if behind
+#   setup-update offer    check, and ask y/N to update now
+set -u
+R="${XDG_STATE_HOME:-$HOME/.local/state}/mango/shipped"
+[ -f "$R/commit" ] || { echo "setup-update: no install record in $R (not installed from a git clone)"; exit 1; }
+COMMIT=$(cat "$R/commit"); BRANCH=$(cat "$R/branch"); REMOTE=$(cat "$R/remote"); SRC=$(cat "$R/source")
+
+# how many commits the remote branch is past the installed one: with the
+# clone around it's a real count; without, only "the remote has moved"
+check() {
+    if [ -d "$SRC/.git" ]; then
+        timeout 20 git -C "$SRC" fetch -q origin "$BRANCH" 2>/dev/null || { echo "setup: can't reach $REMOTE"; return 1; }
+        n=$(git -C "$SRC" rev-list --count "$COMMIT..origin/$BRANCH" 2>/dev/null) || n=""
+        case "$n" in
+            ""|0) echo "setup: up to date ($BRANCH)"; return 1 ;;
+            1)    echo "setup: 1 commit newer on $BRANCH" ;;
+            *)    echo "setup: $n commits newer on $BRANCH" ;;
+        esac
+    else
+        head=$(timeout 20 git ls-remote "$REMOTE" "refs/heads/$BRANCH" 2>/dev/null | cut -f1)
+        [ -n "$head" ] || { echo "setup: can't reach $REMOTE"; return 1; }
+        [ "$head" != "$COMMIT" ] || { echo "setup: up to date ($BRANCH)"; return 1; }
+        echo "setup: $BRANCH has moved on since this install ($SRC is gone, so no count)"
+    fi
+}
+
+# a failure is said and returns, so the terminal stays open on it
+update() {
+    # the folder it came from, else ~/<its name> (a temporary clone's gone)
+    [ -d "$SRC/.git" ] || SRC="$HOME/$(basename "$SRC")"
+    if [ -d "$SRC/.git" ]; then
+        echo "$SRC: pulling $BRANCH"
+        git -C "$SRC" pull --ff-only origin "$BRANCH" \
+            || { echo "update failed: $SRC couldn't pull origin/$BRANCH (git says why above)"; return 1; }
+    elif [ -e "$SRC" ]; then
+        echo "update failed: $SRC is in the way and isn't a clone of the setup"; return 1
+    else
+        echo "cloning $REMOTE ($BRANCH) to $SRC"
+        git clone -q -b "$BRANCH" "$REMOTE" "$SRC" \
+            || { echo "update failed: can't clone $REMOTE"; return 1; }
+    fi
+    if ! (cd "$SRC" && ./install.sh --only-config); then
+        echo "update failed: the installer stopped (see above)"; return 1
+    fi
+}
+
+case "${1:-}" in
+    check) check ;;
+    offer) check || exit 0
+           printf 'update it now? [y/N] '; read -r a
+           case "$a" in y|Y) update ;; esac ;;
+    "")    update && printf '\ndone' ; printf '\npress enter to close '; read -r _ ;;
+    *)     echo "usage: setup-update [check|offer]"; exit 2 ;;
+esac

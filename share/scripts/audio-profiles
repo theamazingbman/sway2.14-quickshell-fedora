@@ -1,0 +1,32 @@
+#!/bin/sh
+# audio-profiles — the sound cards' profiles for the volume popup: a
+# card on "Analog Stereo Output" has no HDMI output to pick until its
+# profile changes, which is otherwise pavucontrol's Configuration tab.
+#   audio-profiles              one line per usable profile, tab-separated:
+#                               card  card description  profile  label  active(1|0)
+#                               (profiles the card reports unavailable, and
+#                               "off", are left out)
+#   audio-profiles set CARD PROFILE
+case "${1:-}" in
+set)  exec pactl set-card-profile "${2:?card}" "${3:?profile}" ;;
+"")
+    exec pactl list cards 2>/dev/null | awk -F'\t' '
+        function flush() { if (card != "") for (i = 1; i <= n; i++) printf "%s\t%s\t%s\t%s\t%d\n", card, desc, P[i], L[i], (P[i] == active) }
+        /^Card #/ { flush(); card = ""; desc = ""; active = ""; n = 0; inprof = 0 }
+        /^\tName: / { card = substr($2, 7) }
+        /device\.description = / { d = $0; sub(/.*= "/, "", d); sub(/"$/, "", d); desc = d }
+        /^\tProfiles:/ { inprof = 1; next }
+        /^\tActive Profile: / { active = substr($2, 17); inprof = 0 }
+        /^\t[A-Z]/ { inprof = 0 }
+        inprof && /^\t\t/ {
+            line = $3; c = index(line, ": "); if (c == 0) next
+            p = substr(line, 1, c - 1); rest = substr(line, c + 2)
+            if (p == "off") next
+            if (rest !~ /available: yes/) next
+            label = rest; sub(/ \(sinks: .*$/, "", label)
+            n++; P[n] = p; L[n] = label
+        }
+        END { flush() }'
+    ;;
+*)  echo "usage: audio-profiles [set CARD PROFILE]" >&2; exit 2 ;;
+esac
