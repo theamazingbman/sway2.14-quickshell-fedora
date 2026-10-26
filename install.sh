@@ -43,7 +43,7 @@ echo -e "${CYAN}"
 echo " +-+-+-+-+-+-+-+-+-+-+-+-+ "
 echo " |  TERRY'S SWAY SETUP   | "
 echo " +-+-+-+-+-+-+-+-+-+-+-+-+ "
-echo " |      WAYLAND WM       | "
+echo " |    WITH QUICKSHELL    | "
 echo " +-+-+-+-+-+-+-+-+-+-+-+-+ "
 echo -e "${NC}\n"
 
